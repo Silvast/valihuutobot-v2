@@ -1,13 +1,7 @@
-use std::fs::File;
-use std::io::BufReader;
-use regex::Replacer;
-use reqwest::Url;
 use rss::{Channel, Item};
 use std::error::Error;
 use reqwest;
 use urlencoding::encode;
-use std::io::BufRead;
-use serde_json::json;
 use serde_json::Value;
 use regex::Regex;
 
@@ -48,28 +42,27 @@ async fn get_feed() -> Result<Channel, Box<dyn Error>> {
     Ok(channel)
 }
 
-async fn edit_memo(item: &Item) {
-        let prefix = String::from("https://avoindata.eduskunta.fi/api/v1/tables/VaskiData/rows?perPage=10&page=0&columnName=Eduskuntatunnus&columnValue=");
-        let suffix = encode(item.title().unwrap()).to_string();
+async fn edit_memo(item: &Item) -> Result<(), Box<dyn Error>> {
+    let prefix = "https://avoindata.eduskunta.fi/api/v1/tables/VaskiData/rows?perPage=10&page=0&columnName=Eduskuntatunnus&columnValue=";
+    let suffix = encode(item.title().unwrap_or_default()).to_string();
 
-        let url = format!("{prefix}{suffix}");
-        // println!("URL: {}", url);
-        let memo = Memo {
-                title: item.title().unwrap().to_string(),
-                link: item.link().unwrap().to_string(),
-                description: item.description().unwrap().to_string(),
-                content: String::from(fetch_memo(&url).await)
-        };
+    let url = format!("{}{}", prefix, suffix);
+    // println!("URL: {}", url);
 
+    let memo = Memo {
+        title: item.title().unwrap_or_default().to_string(),
+        link: item.link().unwrap_or_default().to_string(),
+        description: item.description().unwrap_or_default().to_string(),
+        content: String::from(fetch_memo(&url).await),
+    };
 
     let json_data: Value = match serde_json::from_str(&memo.content) {
         Ok(data) => data,
         Err(err) => {
             println!("Error: {}", err);
-            return;
+            return Err(Box::new(err));
         }
     };
-
     let mut shout_data: Vec<String> = Vec::<String>::new();
 
     if let Some(rows) = json_data["rowData"].as_array() {
@@ -80,21 +73,24 @@ async fn edit_memo(item: &Item) {
 
         }
     }
-    println!("Shouts: {:?}", &shout_data);
-    }
 
-
+    println!("Shouts: {:?}", shout_data);
+    // send to sqs queue 1. Memo data 2. shout_data
+Ok(())
+}
     
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn Error>> {
     match get_feed().await {
         Ok(channel) => {
-            edit_memo(channel.items().get(3).unwrap()).await;
+            edit_memo(channel.items().get(3).unwrap()).await?;
         }
         Err(e) => {
             println!("Error: {}", e);
         }
 
     }
+
+    Ok(())
 }
