@@ -12,7 +12,8 @@ impl Content {
     }
 }
 
-fn find_text_between_brackets(input: &str) -> Vec<String> {
+
+pub fn find_text_between_brackets(input: &str) -> Vec<String> {
     let re = Regex::new(r"\[([^\[\]]+)\]").unwrap();
     let mut results = Vec::new();
 

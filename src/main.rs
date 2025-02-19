@@ -1,10 +1,15 @@
 use std::fs::File;
 use std::io::BufReader;
+use regex::Replacer;
+use reqwest::Url;
 use rss::{Channel, Item};
 use std::error::Error;
 use reqwest;
 use urlencoding::encode;
-mod text_handling;
+use std::io::BufRead;
+use serde_json::json;
+use serde_json::Value;
+use regex::Regex;
 
 
 #[derive(Debug)]
@@ -14,6 +19,18 @@ struct Memo
     link: String,
     description: String,
     content: String
+}
+
+fn find_text_between_brackets(input: &str) -> Vec<String> {
+    let re = Regex::new(r"\[([^\[\]]+)\]").unwrap();
+    let mut results = Vec::new();
+
+    for cap in re.captures_iter(input) {
+        if let Some(matched) = cap.get(1) {
+            results.push(matched.as_str().to_string());
+        }
+    }
+    results
 }
 
 async fn fetch_memo(url: &str) -> String {
@@ -32,27 +49,48 @@ async fn get_feed() -> Result<Channel, Box<dyn Error>> {
 }
 
 async fn edit_memo(item: &Item) {
-    let prefix = String::from("https://avoindata.eduskunta.fi/api/v1/tables/VaskiData/rows?perPage=10&page=0&columnName=Eduskuntatunnus&columnValue=");
-    let suffix = encode(item.title().unwrap()).to_string();
-    let url = format!("{prefix}{suffix}");
-    let memo = Memo {
-        title: item.title().unwrap().to_string(),
-        link: item.link().unwrap().to_string(),
-        description: item.description().unwrap().to_string(),
-        content: String::from(fetch_memo(&url).await)
+        let prefix = String::from("https://avoindata.eduskunta.fi/api/v1/tables/VaskiData/rows?perPage=10&page=0&columnName=Eduskuntatunnus&columnValue=");
+        let suffix = encode(item.title().unwrap()).to_string();
+
+        let url = format!("{prefix}{suffix}");
+        // println!("URL: {}", url);
+        let memo = Memo {
+                title: item.title().unwrap().to_string(),
+                link: item.link().unwrap().to_string(),
+                description: item.description().unwrap().to_string(),
+                content: String::from(fetch_memo(&url).await)
+        };
+
+
+    let json_data: Value = match serde_json::from_str(&memo.content) {
+        Ok(data) => data,
+        Err(err) => {
+            println!("Error: {}", err);
+            return;
+        }
     };
-    println!("Memo: {:?}", memo);
-    let content = text_handling::Content::new(&memo.content);
-    let shouts: Vec<String> = text_handling::get_shouts(&content);
-    println!("Shouts: {:?}", shouts);
-    //try post_shouts_bluesky(&shouts).await;
-}
+
+    let mut shout_data: Vec<String> = Vec::<String>::new();
+
+    if let Some(rows) = json_data["rowData"].as_array() {
+        for row in rows {
+          
+            let shouts: Vec<String> = find_text_between_brackets(&String::from(row[1].as_str().unwrap()));
+            shout_data.extend(shouts.into_iter().filter(|x| x != "Puhemies koputtaa").collect::<Vec<String>>());
+
+        }
+    }
+    println!("Shouts: {:?}", &shout_data);
+    }
+
+
+    
 
 #[tokio::main]
 async fn main() {
     match get_feed().await {
         Ok(channel) => {
-            edit_memo(channel.items().get(0).unwrap()).await;
+            edit_memo(channel.items().get(3).unwrap()).await;
         }
         Err(e) => {
             println!("Error: {}", e);
